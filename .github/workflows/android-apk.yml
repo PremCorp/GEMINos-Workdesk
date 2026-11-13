@@ -5,16 +5,22 @@ on:
   push:
     paths:
       - '.github/workflows/android-apk.yml'
+      - '**.zip'
+      - '**/*.gradle'
+      - '**/*.properties'
+      - '**/*.java'
+      - '**/*.html'
 
 permissions:
   contents: read
 
 jobs:
   build:
+    name: Compile GEMINos
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download source repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Install Java 17
@@ -28,35 +34,59 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Set up Android SDK
+      - name: Install Android SDK
         uses: android-actions/setup-android@v3
-        with:
-         packages: |
-              platforms;android-35
-              build-tools;35.0.0
-       accept-android-sdk-licenses: true
 
-     - name: Extract GEMINos source
+      - name: Install Android 35 packages
         run: |
-          ARCHIVE=$(find . -maxdepth 1 -type f -iname '*.zip' -print -quit)
+          sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Locate GEMINos archive
+        run: |
+          ARCHIVE=$(find . -type f -name "GEMINos_Android_7_1_1_Vault_Update_Functional_Source.zip" -not -path "./.git/*" -print -quit)
+
           if [ -z "$ARCHIVE" ]; then
-            echo "GEMINos ZIP not found"
+            echo "ERROR: GEMINos ZIP archive not found in repository."
             exit 1
           fi
+
+          echo "Found archive: $ARCHIVE"
+          echo "GEMINOS_ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+
+      - name: Extract Android project
+        run: |
           mkdir -p "$RUNNER_TEMP/geminos"
-          unzip -q "$ARCHIVE" -d "$RUNNER_TEMP/geminos"
-          PROJECT_DIR=$(find "$RUNNER_TEMP/geminos" -name settings.gradle -type f -printf '%h\n' | head -n 1)
+          unzip -q "$GEMINOS_ARCHIVE" -d "$RUNNER_TEMP/geminos"
+
+          PROJECT_DIR=$(find "$RUNNER_TEMP/geminos" -name "settings.gradle" -type f -printf '%h\n' | head -n 1)
+
           if [ -z "$PROJECT_DIR" ]; then
-            echo "Android project not found"
+            echo "ERROR: settings.gradle not found."
             exit 1
           fi
+
+          echo "Android project: $PROJECT_DIR"
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-      - name: Compile GEMINos
-        run: gradle --no-daemon --stacktrace -p "$PROJECT_DIR" assembleDebug
+      - name: Check Android project files
+        run: |
+          test -f "$PROJECT_DIR/build.gradle"
+          test -f "$PROJECT_DIR/app/build.gradle"
+          test -f "$PROJECT_DIR/app/src/main/AndroidManifest.xml"
+          test -f "$PROJECT_DIR/app/src/main/java/com/premiumcorp/geminos/MainActivity.java"
+          test -f "$PROJECT_DIR/app/src/main/assets/index.html"
 
-      - name: Upload APK
+      - name: Build GEMINos APK
+        run: |
+          gradle --no-daemon --stacktrace -p "$PROJECT_DIR" assembleDebug
+
+      - name: Upload GEMINos APK
         uses: actions/upload-artifact@v4
+        with:
+          name: GEMINos-Android-7.1.1-APK
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
         with:
           name: GEMINos-Android-APK
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
